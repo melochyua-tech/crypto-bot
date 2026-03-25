@@ -1,85 +1,82 @@
+import time
 import ccxt
 import pandas as pd
 import ta
-import asyncio
-from telegram import Bot
+import requests
 
-TOKEN = "8775882177:AAFZA6boI398Qn0wkrJdZCJ214-ENeEBIms"
+print("СТАРТ 🚀")
+
+# 👉 ВСТАВЬ СВОЙ ТОКЕН
+TOKEN = "8775882177:AAFJk_hSyVxWIWSaTXF9C9Z9N4e-ffSKNEc"
+
+# 👉 ТВОЙ CHAT_ID
 CHAT_ID = "800747174"
 
-bot = Bot(token=TOKEN)
-exchange = ccxt.coinbase()
+exchange = ccxt.binance()
 
-last_signal = None  # чтобы не спамить
+last_signal = None
+
+def get_data():
+    ohlcv = exchange.fetch_ohlcv('BTC/EUR', timeframe='1m', limit=100)
+    df = pd.DataFrame(ohlcv, columns=['time','open','high','low','close','volume'])
+    return df
 
 def analyze():
-    ohlcv = exchange.fetch_ohlcv('BTC/USD', timeframe='1h', limit=100)
-    df = pd.DataFrame(ohlcv, columns=['timestamp','open','high','low','close','volume'])
+    df = get_data()
+    rsi = ta.momentum.RSIIndicator(df['close']).rsi().iloc[-1]
 
-    df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-    df['ema'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
-    macd = ta.trend.MACD(df['close'])
-    df['macd'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-
-    last = df.iloc[-1]
-
-    score = 0
-
-    # RSI
-    if last['rsi'] < 30:
-        score += 1
-    elif last['rsi'] > 70:
-        score -= 1
-
-    # EMA тренд
-    if last['close'] > last['ema']:
-        score += 1
+    if rsi < 40:
+        return "BUY", rsi
+    elif rsi > 70:
+        return "SELL", rsi
     else:
-        score -= 1
+        return "HOLD", rsi
 
-    # MACD
-    if last['macd'] > last['macd_signal']:
-        score += 1
-    else:
-        score -= 1
+def send_message(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    params = {
+        "chat_id": CHAT_ID,
+        "text": text
+    }
+    requests.get(url, params=params)
 
-    # вероятность
-    probability = int((score + 3) / 6 * 100)
-
-    if score >= 2:
-        signal = "📈 BUY"
-    elif score <= -2:
-        signal = "📉 SELL"
-    else:
-        signal = "⏸ HOLD"
-
-    return signal, probability, last
-
-async def send_signal():
+def send_signal(signal, rsi, price):
     global last_signal
 
-    signal, probability, last = analyze()
-
-    # анти-спам
     if signal == last_signal:
         return
 
-    last_signal = signal
+    if signal == "HOLD":
+        send_message(f"📊 Статус: HOLD | RSI: {round(rsi,2)}")
+        return
 
-    message = f"""
-BTC сигнал: {signal}
-Вероятность: {probability}%
+    emoji = {
+        "BUY": "🟢",
+        "SELL": "🔴",
+        "HOLD": "⏸"
+    }
 
-RSI: {round(last['rsi'], 1)}
-Цена: {round(last['close'], 2)}
+    text = f"""
+📊 BTC сигнал: {emoji[signal]} {signal}
+
+RSI: {round(rsi, 2)}
+Цена: {round(price, 2)}€
 """
 
-    await bot.send_message(chat_id=CHAT_ID, text=message)
+    send_message(text)
+    last_signal = signal
 
-async def main():
-    while True:
-        await send_signal()
-        await asyncio.sleep(900)  # каждые 15 минут
+while True:
+    try:
+        signal, rsi = analyze()
+        price = get_data()['close'].iloc[-1]
 
-asyncio.run(main())
+        print("Работает:", signal, rsi)
+
+        send_signal(signal, rsi, price)
+
+        time.sleep(60)
+
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(60)
