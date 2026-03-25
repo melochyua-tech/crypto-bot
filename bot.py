@@ -80,3 +80,15 @@ while True:
     except Exception as e:
         print("Error:", e)
         time.sleep(60)
+import time
+
+print("СТАРТ 🚀")
+
+while True:
+    signal, rsi, price = analyze()
+
+    print("Работает:", signal, rsi)
+
+    send_signal(signal, rsi, price)
+
+    time.sleep(60)
